@@ -4,7 +4,6 @@
 #include "wstypes.h"
 
 #include <stdio.h>
-#include <windows.h>
 
 typedef struct {
     ws_int key;
