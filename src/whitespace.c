@@ -26,13 +26,13 @@ int main(int argc, char **argv) {
 
     ws_string data = {(char *)malloc(wssize), 0};
     if (!data.data) {
-        printf("couldn't allocate buffer for file");
+        printf("couldn't allocate buffer for file\n");
     }
 
     data.length = fread(data.data, 1, wssize, wsfile);
     fclose(wsfile);
 
-    ws_parsed *a = ws_parse(data);
+    ws_program *a = ws_parse(data);
     ws_string_free(data);
 
     size_t length =strlen(argv[1]);
@@ -46,10 +46,10 @@ int main(int argc, char **argv) {
     fclose(wscfile);
     ws_string_free(serialized);
 
-    ws_compiled *b = ws_compile(a);
+    ws_compile(a);
 
-    ws_execute(b);
-    ws_parsed_free(b);
+    ws_execute(a);
+    ws_program_free(a);
 
     return 0;
 }

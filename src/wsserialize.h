@@ -6,6 +6,19 @@
 
 #include "wstypes.h"
 
+//the buffer used when serializing
+typedef struct {
+    size_t length;
+    char *buffer;
+    size_t index;
+} ws_serializing_buffer;
+
+
+
+/* First a set serializing and unserializing functiosn for each datatype
+ * Is provided, and finally the functions to serialize and unserialize the whole
+ * thing
+ */
 static ws_serializing_buffer serializing_buffer() {
     ws_serializing_buffer dest;
     dest.length = SERIALIZING_BUFFER_SIZE;
@@ -127,11 +140,21 @@ static ws_label unserialize_label(ws_serializing_buffer *const source) {
 }
 
 static void serialize_ws_int(const ws_int number, ws_serializing_buffer *const dest) {
-    serialize_int32(ws_int_to_int(number), dest);
+    if (number.length) {
+        printf("bigint not yet supported\n");
+    }
+    serialize_uint32(number.length, dest);
+    serialize_int32(number.data, dest);
 }
 
 static ws_int unserialize_ws_int(ws_serializing_buffer *const source) {
-    return ws_int_from_int(unserialize_int32(source));
+    ws_int result;
+    result.length = unserialize_uint32(source);
+    if (result.length) {
+        printf("bigint not yet supported\n");
+    }
+    result.data = unserialize_int32(source);
+    return result;
 }
 
 static void serialize_command(const ws_command *const command, const int compiled, ws_serializing_buffer *const dest) {
@@ -169,7 +192,7 @@ static void unserialize_command(ws_command *const command, const int compiled, w
     }
 }
 
-static void serialize_program(const ws_parsed *const program, ws_serializing_buffer *const dest) {
+static void serialize_program(const ws_program *const program, ws_serializing_buffer *const dest) {
     serialize_int32(program->flags, dest);
     serialize_uint32(program->length, dest);
     for (size_t i = 0; i < (program->length); i++) {
@@ -177,10 +200,10 @@ static void serialize_program(const ws_parsed *const program, ws_serializing_buf
     }
 }
 
-static ws_parsed *unserialize_program(ws_serializing_buffer *const source) {
+static ws_program *unserialize_program(ws_serializing_buffer *const source) {
     const int flags = unserialize_int32(source);
     const size_t length = unserialize_uint32(source);
-    ws_parsed *const program = ws_parsed_alloc(length);
+    ws_program *const program = ws_program_alloc(length);
     program->flags = flags;
     for(size_t i = 0; i < program->length; i++) {
         unserialize_command(program->commands + i, flags & 0x1, source);
@@ -188,13 +211,16 @@ static ws_parsed *unserialize_program(ws_serializing_buffer *const source) {
     return program;
 }
 
-ws_string ws_serialize(const ws_parsed *const program) {
+
+
+
+ws_string ws_serialize(const ws_program *const program) {
     ws_serializing_buffer dest = serializing_buffer(NULL);
     serialize_program(program, &dest);
     return serializing_finish(dest);
 }
 
-ws_parsed *ws_unserialize(const ws_string buffer) {
+ws_program *ws_unserialize(const ws_string buffer) {
     ws_serializing_buffer source = {buffer.length, buffer.data, 0};
     return unserialize_program(&source);
 }

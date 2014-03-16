@@ -11,6 +11,10 @@
 #include "wstypes.h"
 #include "whitespace.h"
 
+
+
+/* A map for easy printing of the commands
+ */
 const ws_string ws_command_names[COMMANDLENGTH] = {
     {"push", 4},
     {"duplicate", 9},
@@ -42,6 +46,10 @@ const ws_string ws_command_names[COMMANDLENGTH] = {
     {"inputnum", 8}
 };
 
+
+
+/* The table of commandtype: startstring
+ */
 const ws_string ws_command_map[COMMANDLENGTH] = {
     {"  ", 2},
     {" \n ", 3},
@@ -73,7 +81,10 @@ const ws_string ws_command_map[COMMANDLENGTH] = {
     {"\t\n\t\t", 4}
 };
 
-//data structures indicating if a certain command takes a parameter or a label
+
+
+/* data structures indicating if a certain command takes a parameter or a label
+ */
 const char ws_parameter_map[COMMANDLENGTH] = {
     1, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 };
@@ -82,53 +93,19 @@ const char ws_label_map[COMMANDLENGTH] = {
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0
 };
 
-void ws_visualize(const ws_string string) {
-    for(size_t i = 0; i < string.length; i++) {
-        switch (string.data[i]) {
-            case SPACE:
-                string.data[i] = 'S';
-                break;
-            case TAB:
-                string.data[i] = 'T';
-                break;
-            case BREAK:
-                string.data[i] = 'N';
-                break;
-        }
-    }
-}
 
-static ws_parsed *ws_parsed_alloc(const size_t commandno) {
-    ws_parsed *const result = (ws_parsed *)malloc(sizeof(ws_parsed));
-    if (commandno) {
-        result->commands = malloc(sizeof(ws_command) * commandno);
-    }
-    result->length = commandno;
-    result->flags = 0;
-    return result;
-}
 
-static void ws_parsed_free(ws_parsed *const program) {
-    //free the program, commands, label strings and ws_ints
-    ws_command *command;
-    for(size_t i = 0; i < program->length; i++){
-        command = program->commands + i;
+/* Forward declarations
+ */
+void ws_visualize(ws_string);
+ws_program *ws_program_alloc(size_t);
+void ws_program_free(ws_program *);
 
-        if (ws_parameter_map[command->type]) {
-            ws_int_free(command->parameter);
 
-        } else if (ws_label_map[command->type] && !(program->flags & 0x1)) {
-            ws_label_free(command->label);
-        }
-#if DEBUG
-        ws_string_free(command->text);
-#endif
-        free(command);
-    }
-    free(program);
-}
 
-ws_parsed *ws_parse(const ws_string text) {
+/* The actual parser implementation
+ */
+ws_program *ws_parse(const ws_string text) {
 
     ws_command *command_array = (ws_command *)malloc(sizeof(ws_command)*COMMAND_ARRAY_SIZE);
     ws_command *current_node;
@@ -161,13 +138,13 @@ ws_parsed *ws_parse(const ws_string text) {
 
             //check if we're not running out of bounds
             if (i == text.length) {
-                printf("end of buffer while parsing command at position %d", i);
+                printf("end of buffer while parsing command at position %d\n", i);
                 exit(EXIT_FAILURE);
             }
 
             //there are no commands of length 5 or higher
             if (current_command.length==4) {
-                printf("no valid command at position %d", i - 4);
+                printf("no valid command at position %d\n", i - 4);
                 exit(EXIT_FAILURE);
             }
 
@@ -201,7 +178,7 @@ ws_parsed *ws_parse(const ws_string text) {
             //figure out the size of the parameter
             parameter_end = (size_t)((char *)memchr(text.data + parameter_start, BREAK, text.length - parameter_start) - text.data);
             if (!parameter_end) {
-                printf("end of buffer while parsing parameter at position %d", parameter_start);
+                printf("end of buffer while parsing parameter at position %d\n", parameter_start);
                 exit(EXIT_FAILURE);
             }
             current_parameter_size = parameter_end - parameter_start + 1; //include the newline in here!
@@ -275,10 +252,56 @@ ws_parsed *ws_parse(const ws_string text) {
         exit(EXIT_FAILURE);
     }
 
-    ws_parsed *program = ws_parsed_alloc(0);
+    ws_program *program = ws_program_alloc(0);
     program->commands = (ws_command *)realloc(command_array, sizeof(ws_command)*command_array_length);
     program->length = command_array_length;
     return program;
+}
+
+void ws_visualize(const ws_string string) {
+    for(size_t i = 0; i < string.length; i++) {
+        switch (string.data[i]) {
+            case SPACE:
+                string.data[i] = 'S';
+                break;
+            case TAB:
+                string.data[i] = 'T';
+                break;
+            case BREAK:
+                string.data[i] = 'N';
+                break;
+        }
+    }
+}
+
+ws_program *ws_program_alloc(const size_t commandno) {
+    ws_program *const result = (ws_program *)malloc(sizeof(ws_program));
+    if (commandno) {
+        result->commands = malloc(sizeof(ws_command) * commandno);
+    }
+    result->length = commandno;
+    result->flags = 0;
+    return result;
+}
+
+void ws_program_free(ws_program *const program) {
+    //free the program, commands, label strings and ws_ints
+    ws_command *command;
+    for(size_t i = 0; i < program->length; i++){
+        command = program->commands + i;
+
+        if (ws_parameter_map[command->type]) {
+            ws_int_free(command->parameter);
+
+        } else if (ws_label_map[command->type] && !(program->flags & 0x1)) {
+            ws_label_free(command->label);
+        }
+#if DEBUG
+        ws_string_free(command->text);
+#endif
+        free(command);
+    }
+    free(program);
 }
 
 #endif

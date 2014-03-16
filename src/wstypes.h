@@ -7,6 +7,8 @@
 #include <stdio.h>
 #include <stdint.h>
 
+#define ws_hash_prime 1000003
+
 //the constants used to indicate the type of ws command the current node has
 typedef enum {
     push            = 0,
@@ -41,7 +43,11 @@ typedef enum {
 
 // placeholder struct for bigint
 typedef struct {
-    int data;
+    size_t length;
+    union {
+        int data;
+        char *digits;
+    };
 } ws_int;
 
 // a container of a char pointer and size_t length for easy manipulation of strings
@@ -70,27 +76,9 @@ typedef struct {
     int flags;
     size_t length;
     ws_command *commands;
-} ws_parsed, ws_compiled;
+} ws_program;
 
-typedef struct {
-    size_t length;
-    char *buffer;
-    size_t index;
-} ws_serializing_buffer;
 
-// a map entry used for compiling labels
-typedef struct {
-    ws_label key;
-    size_t value;
-    char initialized;
-} ws_map_entry;
-
-// the map used for compiling labels
-typedef struct {
-    ws_map_entry *entries;
-    size_t size;
-    size_t length;
-} ws_map;
 
 /* Helper functions for dealining with the ws_string struct. 
  * This struct is mostly just syntactic sugar for a char arran and size_t length
@@ -118,6 +106,20 @@ void ws_string_print(const ws_string text) {
     }
 }
 
+unsigned int ws_string_hash(const ws_string input) {
+    /* a very simple hashing function. it is primarily meant to be fast, collision resolution does the rest
+     * similar to cpythons string hashing function.
+     */
+    if (!input.length) {
+        return 0;
+    }
+    unsigned int value = input.data[0] << 7;
+    for(size_t i = 0; i < input.length; i++) {
+        value = (value * ws_hash_prime) ^ input.data[i];
+    }
+    return value ^ input.length;
+}
+
 int ws_string_compare(const ws_string a, const ws_string b) {
     if (a.length != b.length) {
         return -1;
@@ -127,9 +129,11 @@ int ws_string_compare(const ws_string a, const ws_string b) {
 
 
 
-/* Sadly we can't just treat labels as packed binary data, due to this forgetting about trailing 0's*/
+/* Labels are very similar to strings, 
+ * except that we store the length of the bits in the label
+ * not the bytes, due to that being lossy on trailing 0's
+ */
 #define ws_round8up(x) ((x)/8 + !!((x)%8) + (!x))
-#define ws_hash_prime 1000003
 
 ws_label ws_label_from_whitespace(const ws_string old) {
     //criteria for the return string. length is at least 1, or len(old)/8 rounded up
@@ -154,11 +158,11 @@ void ws_label_free(const ws_label input) {
     free(input.data);
 }
 
-int ws_label_hash(const ws_label input) {
-    // a very simple hashing function. it is primarily meant to be fast, collision resolution does the rest
-    // similar to cpythons string hashing function.
+unsigned int ws_label_hash(const ws_label input) {
+    /* An adapted version of the string hashing function
+     */
     size_t length = ws_round8up(input.length);
-    int value = input.data[0] << 7; // [0] always exists
+    unsigned int value = input.data[0] << 7; // [0] always exists
 
     for(size_t i = 0; i < length; i++) {
         value = (value*ws_hash_prime) ^ input.data[i];
@@ -175,25 +179,45 @@ int ws_label_compare(const ws_label a, const ws_label b) {
 
 
 
-
 /* Placeholder implementation of a bigint.
- * currently it's just a normal int in a structure, but
- * this is easily altered.
+ * It's still a work in progress, anyway the idea is
+ * If length is zero, then data is just an int. This is mainly for speed reasons
+ * Else, digits will be an array of something holding the value
  */
 void ws_int_free(const ws_int input) {
     //current implementation of ws_int doesn't allocate anything dynamically
+    if(input.length) {
+        free(input.digits);
+    }
+}
+
+ws_int ws_int_copy(const ws_int input) {
+    if (input.length) {
+        printf("length: %d ", input.length);
+        printf("bigint not yet supported in copy\n");
+    }
+    return input;
+}
+
+ws_int ws_int_from_int(const int input) {
+    ws_int result;
+    result.length = 0;
+    result.data = input;
+    return result;
 }
 
 ws_int ws_int_from_whitespace(const ws_string string) {
-    ws_int result;
-    if (string.length < 2) {
-        result.data = 0;
-        return result;
+    
+    //protect against empty parameters or sign only parameters
+    if(string.length < 2) {
+        return ws_int_from_int(0);
     }
 
     int accumulator = 0;
     size_t datalength = string.length-1;
-    if (datalength >= 32) {
+    // note that since whitespace uses ones complement while we use twos complement, all 32 long whiespace 
+    // parameters are valid ints
+    if (datalength > 31) { 
         printf("overflow in creating ws_int");
         exit(EXIT_FAILURE);
     }
@@ -206,20 +230,23 @@ ws_int ws_int_from_whitespace(const ws_string string) {
             accumulator -= (string.data[i] == TAB) << (datalength-i);
         }
     }
-    result.data = accumulator;
-    return result;
-}
 
-ws_int ws_int_from_int(const int input) {
-    const ws_int result = {input};
-    return result;
+    return ws_int_from_int(accumulator);
 }
 
 int ws_int_to_int(const ws_int input) {
+    if (input.length) {
+        printf("length: %d ", input.length);
+        printf("bigint not yet supported\n");
+    }
     return input.data;
 }
 
 void ws_int_print(const ws_int input) {
+    if (input.length) {
+        printf("length: %d ", input.length);
+        printf("bigint not yet supported\n");
+    }
     printf("%d", input.data);
 }
 
@@ -229,143 +256,81 @@ ws_int ws_int_input() {
     return ws_int_from_int(input);
 }
 
+unsigned int ws_int_hash(const ws_int input) {
+    if (input.length) {
+        printf("length: %d ", input.length);
+        printf("bigint not yet supported\n");
+    }
+    return (unsigned int)input.data;
+}
+
 int ws_int_compare(const ws_int left, const ws_int right) {
+    if (left.length || right.length) {
+        printf("length: %d %d ", left.length, right.length);
+        printf("bigint not yet supported\n");
+    }
     return left.data != right.data;
 }
 
-int ws_int_hash(const ws_int input) {
-    return input.data;
-}
-
 ws_int ws_int_multiply(const ws_int left, const ws_int right) {
-    ws_int result = {left.data * right.data};
+    if (left.length || right.length) {
+        printf("length: %d %d ", left.length, right.length);
+        printf("bigint not yet supported\n");
+    }
+    ws_int result = {0, {left.data * right.data}};
     return result;
 }
 
 ws_int ws_int_divide(const ws_int left, const ws_int right) {
-    ws_int result = {left.data / right.data};
+    if (left.length || right.length) {
+        printf("length: %d %d ", left.length, right.length);
+        printf("bigint not yet supported\n");
+    }
+    ws_int result = {0, {left.data / right.data}};
     return result;
 }
 
 ws_int ws_int_modulo(const ws_int left, const ws_int right) {
-    ws_int result = {left.data % right.data};
+    if (left.length || right.length) {
+        printf("length: %d %d ", left.length, right.length);
+        printf("bigint not yet supported\n");
+    }
+    ws_int result = {0, {left.data % right.data}};
     return result;
 }
 
 ws_int ws_int_add(const ws_int left, const ws_int right) {
-    ws_int result = {left.data + right.data};
+    if (left.length || right.length) {
+        printf("length: %d %d ", left.length, right.length);
+        printf("bigint not yet supported\n");
+    }
+    ws_int result = {0, {left.data + right.data}};
     return result;
 }
 
 ws_int ws_int_subtract(const ws_int left, const ws_int right) {
-    ws_int result = {left.data - right.data};
+    if (left.length || right.length) {
+        printf("length: %d %d ", left.length, right.length);
+        printf("bigint not yet supported\n");
+    }
+    ws_int result = {0, {left.data - right.data}};
     return result;
 }
 
-
-/* an implementation of a label: int map follows. 
- * It is implemented as a hash table
- * It is impossible to overwrite keys in this implementation, -1 will be returned.
- * for more comments see wsmachine's heap
- */
-#define WS_MAP_SIZE 16
-#define WS_MAP_RESIZE_FACTOR 4
-#define WS_MAP_RESIZE_TIME(length, size) (((length)+1)*3 > (size)*2)
-#define WS_MAP_PERTURB_SHIFT 5
-
-static ws_map *ws_map_initialize() {
-    ws_map *const map = (ws_map *)malloc(sizeof(ws_map));
-    map->size = WS_MAP_SIZE;
-    map->length = 0;
-    map->entries = (ws_map_entry *)malloc(sizeof(ws_map_entry) * WS_MAP_SIZE);
-    for(size_t i = 0; i < WS_MAP_SIZE; i++) {
-        map->entries[i].initialized = 0;
+int ws_int_iszero(const ws_int input) {
+    if (input.length) {
+        printf("length: %d ", input.length);
+        printf("bigint not yet supported\n");
     }
-    return map;
+    return input.data == 0;
 }
 
-static void ws_map_free(ws_map *const map) {
-    for(size_t i = 0; i < map->size; i++) {
-        if (map->entries[i].initialized) {
-            ws_label_free(map->entries[i].key);
-        }  
+int ws_int_isnegative(const ws_int input) {
+    if (input.length) {
+        printf("length: %d ", input.length);
+        printf("bigint not yet supported\n");
     }
-    free(map->entries);
-    free(map);
+    return input.data < 0;
 }
 
-static void ws_map_print(ws_map *const map) {
-    printf("hashtable size %#X, length %#X\n", map->size, map->length);
-    for(size_t i = 0; i < map->size; i++) {
-        if (map->entries[i].initialized) {
-            printf("%#4X ", i % map->size);
-            ws_label_print(map->entries[i].key);
-            printf(": %4d\n", map->entries[i].value);
-        } else {
-            printf("%#4X NULL: NULL\n", i % map->size);
-        }
-    }
-}
-
-static int ws_map_insert(ws_map *const map, const ws_label key, const int value) {
-
-    int hash = ws_label_hash(key);
-    int perturb = hash;
-    size_t position = hash % map->size;
-    while (map->entries[position].initialized &&
-           ws_label_compare(map->entries[position].key, key)) {
-        position = (position * 5 + 1 + perturb) % map->size;
-        perturb >>= WS_MAP_PERTURB_SHIFT;
-    }
-    if (map->entries[position].initialized) {
-        return -1;
-    }
-    map->entries[position].initialized = 1;
-    map->entries[position].key = key;
-    map->entries[position].value = value;
-    map->length++;
-    return 0;
-}
-
-static int ws_map_set(ws_map *const map, const ws_label key, const size_t value) {
-    // check if we should resize
-    if (WS_MAP_RESIZE_TIME(map->length, map->size)) {
-
-        ws_map_entry *old = map->entries;
-        size_t old_size = map->size;
-
-        map->size *= WS_MAP_RESIZE_FACTOR;
-        map->length = 0;
-        map->entries = (ws_map_entry *)malloc(sizeof(ws_map_entry) * map->size);
-
-        for(size_t i = 0; i < map->size; i++) {
-            map->entries[i].initialized = 0;
-        }
-
-        for(size_t i = 0; i < old_size; i++) {
-            if (old[i].initialized) {
-                ws_map_insert(map, old[i].key, old[i].value);
-            }
-        }
-
-        free(old);
-    }
-
-    return ws_map_insert(map, key, value);
-}
-
-static int ws_map_get(const ws_map *const map, const ws_label key) {
-
-    int hash = ws_label_hash(key);
-    int perturb = hash;
-    size_t position = hash % map->size;
-    while (map->entries[position].initialized) {
-        if (!ws_label_compare(map->entries[position].key, key)) {
-            return map->entries[position].value;
-        }
-        position = (position * 5 + 1 + perturb) % map->size;
-        perturb >>= WS_MAP_PERTURB_SHIFT;
-    }
-    return -1;
-}
 #endif
