@@ -45,10 +45,11 @@ typedef struct {
 } ws_int;
 
 // a container of a char pointer and size_t length for easy manipulation of strings
+// in ws_label length represents the amount of bits, not amount of bytes.
 typedef struct {
     char *data;
     size_t length;
-} ws_string;
+} ws_string, ws_label;
 
 // a whitespace command node. depending on the type and if it's parsed/compiled, the union contains:
 // a: a big int, b: a string label, or c: an offset in the program
@@ -56,7 +57,7 @@ typedef struct {
     ws_command_type type; 
     union {
         ws_int parameter;
-        ws_string label;
+        ws_label label;
         size_t jumpoffset;
     };
 #if DEBUG
@@ -66,7 +67,7 @@ typedef struct {
 
 // a container for whitespace nodes. the types are purely for indicating wether the label compilation has been performed
 typedef struct {
-    int compiled;
+    int flags;
     size_t length;
     ws_command *commands;
 } ws_parsed, ws_compiled;
@@ -79,9 +80,9 @@ typedef struct {
 
 // a map entry used for compiling labels
 typedef struct {
-    ws_string label;
-//    uint32_t hash;
-    int offset;
+    ws_label key;
+    size_t value;
+    char initialized;
 } ws_map_entry;
 
 // the map used for compiling labels
@@ -117,24 +118,62 @@ void ws_string_print(const ws_string text) {
     }
 }
 
-int ws_strcmp(const ws_string a, const ws_string b) {
+int ws_string_compare(const ws_string a, const ws_string b) {
     if (a.length != b.length) {
         return -1;
     }
     return memcmp(a.data, b.data, a.length);
 }
 
-ws_string ws_string_from_whitespace(const ws_string old) {
+
+
+/* Sadly we can't just treat labels as packed binary data, due to this forgetting about trailing 0's*/
+#define ws_round8up(x) ((x)/8 + !!((x)%8) + (!x))
+#define ws_hash_prime 1000003
+
+ws_label ws_label_from_whitespace(const ws_string old) {
     //criteria for the return string. length is at least 1, or len(old)/8 rounded up
-    ws_string result;
-    result.length = 1 + old.length / 8 - (old.length % 8 == 0 && old.length != 0);
-    result.data = (char *)malloc(result.length);
-    memset(result.data, 0, result.length);
+    size_t byte_length = ws_round8up(old.length);
+    ws_label result = {(char *)malloc(byte_length), old.length};
+    memset(result.data, 0, byte_length);
+    
     for(size_t i = 0; i < old.length; i++) {
-        result.data[i/8] |= ((old.data[i] == SPACE)? 0: 1) << (7 - (i%8));
+        result.data[byte_length - 1 - i/8] |= ((old.data[result.length - 1 - i] == SPACE)? 0: 1) << (i%8);
     }
     return result;
 }
+
+void ws_label_print(const ws_label input) {
+    size_t length = ws_round8up(input.length);
+    for(size_t i = 0; i < length; i++) {
+        putchar(input.data[i]);
+    }
+}
+
+void ws_label_free(const ws_label input) {
+    free(input.data);
+}
+
+int ws_label_hash(const ws_label input) {
+    // a very simple hashing function. it is primarily meant to be fast, collision resolution does the rest
+    // similar to cpythons string hashing function.
+    size_t length = ws_round8up(input.length);
+    int value = input.data[0] << 7; // [0] always exists
+
+    for(size_t i = 0; i < length; i++) {
+        value = (value*ws_hash_prime) ^ input.data[i];
+    }
+    return value ^ input.length;
+}
+
+int ws_label_compare(const ws_label a, const ws_label b) {
+    if (a.length != b.length) {
+        return -1;
+    }
+    return memcmp(a.data, b.data, ws_round8up(a.length));
+}
+
+
 
 
 /* Placeholder implementation of a bigint.
@@ -190,8 +229,8 @@ ws_int ws_int_input() {
     return ws_int_from_int(input);
 }
 
-int ws_int_cmp(const ws_int left, const ws_int right) {
-    return left.data == right.data;
+int ws_int_compare(const ws_int left, const ws_int right) {
+    return left.data != right.data;
 }
 
 int ws_int_hash(const ws_int input) {
@@ -224,58 +263,108 @@ ws_int ws_int_subtract(const ws_int left, const ws_int right) {
 }
 
 
-/* an implementation of a string: int map follows. 
- * This implementation is rather crude, and has O(n) lookup time.
- # To be replaced by a better one, probably similar to the hashtable which the machine uses
+/* an implementation of a label: int map follows. 
+ * It is implemented as a hash table
+ * It is impossible to overwrite keys in this implementation, -1 will be returned.
+ * for more comments see wsmachine's heap
  */
-#define WS_MAP_SIZE 32
-#define WS_MAP_RESIZE 2
+#define WS_MAP_SIZE 16
+#define WS_MAP_RESIZE_FACTOR 4
+#define WS_MAP_RESIZE_TIME(length, size) (((length)+1)*3 > (size)*2)
+#define WS_MAP_PERTURB_SHIFT 5
 
-static ws_map *ws_map_alloc() {
+static ws_map *ws_map_initialize() {
     ws_map *const map = (ws_map *)malloc(sizeof(ws_map));
     map->size = WS_MAP_SIZE;
     map->length = 0;
     map->entries = (ws_map_entry *)malloc(sizeof(ws_map_entry) * WS_MAP_SIZE);
+    for(size_t i = 0; i < WS_MAP_SIZE; i++) {
+        map->entries[i].initialized = 0;
+    }
     return map;
 }
 
-static void ws_map_checksize(ws_map *const map) {
-    if (map->length == map->size) {
-        map->size *= WS_MAP_RESIZE;
-        map->entries = (ws_map_entry *)realloc(map->entries, sizeof(ws_map_entry) * map->size);
-    }
-}
-
 static void ws_map_free(ws_map *const map) {
-    for(size_t i = 0; i < map->length; i++) {
-        ws_string_free(map->entries[i].label);
+    for(size_t i = 0; i < map->size; i++) {
+        if (map->entries[i].initialized) {
+            ws_label_free(map->entries[i].key);
+        }  
     }
     free(map->entries);
     free(map);
 }
 
-static int ws_map_insert(ws_map *const map, const ws_string label, const int offset) {
-    ws_map_entry *current_entry;
-    for(size_t i = 0; i < map->length; i++) {
-        current_entry = map->entries + i;
-        if (!ws_strcmp(current_entry->label, label)) {
-            return -1;
+static void ws_map_print(ws_map *const map) {
+    printf("hashtable size %#X, length %#X\n", map->size, map->length);
+    for(size_t i = 0; i < map->size; i++) {
+        if (map->entries[i].initialized) {
+            printf("%#4X ", i % map->size);
+            ws_label_print(map->entries[i].key);
+            printf(": %4d\n", map->entries[i].value);
+        } else {
+            printf("%#4X NULL: NULL\n", i % map->size);
         }
     }
-    ws_map_checksize(map);
-    map->entries[map->length].label = label;
-    map->entries[map->length].offset = offset;
+}
+
+static int ws_map_insert(ws_map *const map, const ws_label key, const int value) {
+
+    int hash = ws_label_hash(key);
+    int perturb = hash;
+    size_t position = hash % map->size;
+    while (map->entries[position].initialized &&
+           ws_label_compare(map->entries[position].key, key)) {
+        position = (position * 5 + 1 + perturb) % map->size;
+        perturb >>= WS_MAP_PERTURB_SHIFT;
+    }
+    if (map->entries[position].initialized) {
+        return -1;
+    }
+    map->entries[position].initialized = 1;
+    map->entries[position].key = key;
+    map->entries[position].value = value;
     map->length++;
     return 0;
 }
 
-static int ws_map_get(const ws_map *const map, const ws_string label) {
-    ws_map_entry *current_entry;
-    for(size_t i = 0; i < map->length; i++) {
-        current_entry = map->entries + i;
-        if (!ws_strcmp(current_entry->label, label)) {
-            return current_entry->offset;
+static int ws_map_set(ws_map *const map, const ws_label key, const size_t value) {
+    // check if we should resize
+    if (WS_MAP_RESIZE_TIME(map->length, map->size)) {
+
+        ws_map_entry *old = map->entries;
+        size_t old_size = map->size;
+
+        map->size *= WS_MAP_RESIZE_FACTOR;
+        map->length = 0;
+        map->entries = (ws_map_entry *)malloc(sizeof(ws_map_entry) * map->size);
+
+        for(size_t i = 0; i < map->size; i++) {
+            map->entries[i].initialized = 0;
         }
+
+        for(size_t i = 0; i < old_size; i++) {
+            if (old[i].initialized) {
+                ws_map_insert(map, old[i].key, old[i].value);
+            }
+        }
+
+        free(old);
+    }
+
+    return ws_map_insert(map, key, value);
+}
+
+static int ws_map_get(const ws_map *const map, const ws_label key) {
+
+    int hash = ws_label_hash(key);
+    int perturb = hash;
+    size_t position = hash % map->size;
+    while (map->entries[position].initialized) {
+        if (!ws_label_compare(map->entries[position].key, key)) {
+            return map->entries[position].value;
+        }
+        position = (position * 5 + 1 + perturb) % map->size;
+        perturb >>= WS_MAP_PERTURB_SHIFT;
     }
     return -1;
 }

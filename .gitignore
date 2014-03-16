@@ -1,1 +1,4 @@
 *.exe
+*.ws
+*.wsc
+*.txt

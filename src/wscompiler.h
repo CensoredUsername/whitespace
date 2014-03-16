@@ -13,7 +13,7 @@
  * the strings will be free'd in the process, this is a lossy process, label names are lost in this step
  */
 ws_compiled *ws_compile(ws_parsed *const parsed) {
-    if (parsed->compiled) {
+    if (parsed->flags & 0x1) {
         printf("cannot compile already compiled program");
         exit(EXIT_FAILURE);
     }
@@ -24,36 +24,50 @@ ws_compiled *ws_compile(ws_parsed *const parsed) {
     int offset;
     ws_command *current_command;
 
-    ws_map *const labelmap = ws_map_alloc();
+    ws_map *const map = ws_map_initialize();
 
     for(size_t i = 0; i < parsed->length; i++) {
         current_command = parsed->commands + i;
+
         if (current_command->type == label) {
-            if (ws_map_insert(labelmap, current_command->label, i)) {
+
+            // insert the label offset into the hashmap
+            if (ws_map_set(map, current_command->label, i)) {
+
                 printf("duplicate label found at command %d\n", i);
                 exit(EXIT_FAILURE);
             }
             current_command->jumpoffset = i;
+
         } else if (ws_label_map[current_command->type]) {
+
+            // resize if necessary
             if (jump_offsets_size == jump_offsets_length) {
                 jump_offsets_size *= 2;
                 jump_offsets = (size_t *)realloc(jump_offsets, sizeof(size_t) * jump_offsets_size);
             }
+
             jump_offsets[jump_offsets_length++] = i;
+
         }
     }
+    
+    //for each of the jump/calls, replace the label by 
     for(size_t i = 0; i < jump_offsets_length; i++) {
         current_command = parsed->commands + jump_offsets[i];
-        offset = ws_map_get(labelmap, current_command->label);
+        offset = ws_map_get(map, current_command->label);
+
         if (offset < 0) {
             printf("label not found at command %d\n", jump_offsets[i]);
             exit(EXIT_FAILURE);
         }
         current_command->jumpoffset = offset;
     }
-    ws_map_free(labelmap); //note, this frees all the old label strings too because I didn't copy them.
+
+    ws_map_free(map); //note, this frees all the old label strings too because I didn't copy the char *'s.
     free(jump_offsets);
-    parsed->compiled = 1;
+
+    parsed->flags |= 0x1;
     return (ws_compiled *)parsed;
 }
 

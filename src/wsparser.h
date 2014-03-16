@@ -104,7 +104,7 @@ static ws_parsed *ws_parsed_alloc(const size_t commandno) {
         result->commands = malloc(sizeof(ws_command) * commandno);
     }
     result->length = commandno;
-    result->compiled = 0;
+    result->flags = 0;
     return result;
 }
 
@@ -117,8 +117,8 @@ static void ws_parsed_free(ws_parsed *const program) {
         if (ws_parameter_map[command->type]) {
             ws_int_free(command->parameter);
 
-        } else if (ws_label_map[command->type] && !program->compiled) {
-            ws_string_free(command->label);
+        } else if (ws_label_map[command->type] && !(program->flags & 0x1)) {
+            ws_label_free(command->label);
         }
 #if DEBUG
         ws_string_free(command->text);
@@ -186,7 +186,7 @@ ws_parsed *ws_parse(const ws_string text) {
 
             for(size_t j = 0; j < COMMANDLENGTH; j++) {
 
-                if (!ws_strcmp(ws_command_map[j], current_command)) {
+                if (!ws_string_compare(ws_command_map[j], current_command)) {
                     current_node->type = j;
                     succes = 1;
                     break;
@@ -224,7 +224,7 @@ ws_parsed *ws_parse(const ws_string text) {
 
             //parse the parameters into their data structures
             if (ws_label_map[current_node->type]) {
-                current_node->label = ws_string_from_whitespace(current_parameter);
+                current_node->label = ws_label_from_whitespace(current_parameter);
             } else {
                 current_node->parameter = ws_int_from_whitespace(current_parameter);
             }
@@ -253,7 +253,7 @@ ws_parsed *ws_parse(const ws_string text) {
         command_array_length++;
 
         //read till we encounter a new whitespace character
-        while (text.data[i] != SPACE && text.data[i] != TAB && text.data[i] != BREAK) {
+        while (i != text.length && (text.data[i] != SPACE && text.data[i] != TAB && text.data[i] != BREAK)) {
             i++;
             if (i == text.length) {
                 break;
@@ -269,6 +269,11 @@ ws_parsed *ws_parse(const ws_string text) {
 
     //put the program together and clean up
     ws_string_free(current_parameter);
+
+    if (!command_array_length) {
+        printf("empty program\n");
+        exit(EXIT_FAILURE);
+    }
 
     ws_parsed *program = ws_parsed_alloc(0);
     program->commands = (ws_command *)realloc(command_array, sizeof(ws_command)*command_array_length);

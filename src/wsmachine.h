@@ -35,12 +35,12 @@ typedef struct {
  * The details of this implementation have been inspired by cpythons dict implementation
  * 
  */
-#define WS_HEAP_SIZE 8
+#define WS_HEAP_SIZE 16
 #define WS_HEAP_RESIZE_FACTOR 4
-#define WS_RESIZE_TIME(length, size) (((length)+1)*3 > (size)*2)
-#define WS_PERTURB_SHIFT 5
+#define WS_HEAP_RESIZE_TIME(length, size) (((length)+1)*3 > (size)*2)
+#define WS_HEAP_PERTURB_SHIFT 5
 
-static ws_heap *ws_heap_initialize() {
+ws_heap *ws_heap_initialize() {
     ws_heap *result = (ws_heap *)malloc(sizeof(ws_heap));
     result->size = WS_HEAP_SIZE;
     result->length = 0;
@@ -51,31 +51,43 @@ static ws_heap *ws_heap_initialize() {
     return result;
 }
 
-static void ws_heap_free(ws_heap *const table) {
+void ws_heap_free(ws_heap *const table) {
     free(table->entries);
     free(table);
 }
 
+void ws_heap_print(ws_heap *const table) {
+    printf("hashtable size %#X, length %#X\n", table->size, table->length);
+    for(size_t i = 0; i < table->size; i++) {
+        if (table->entries[i].initialized) {
+            printf("%#4X %4d: %4d\n", i % table->size, table->entries[i].key, table->entries[i].value);
+        } else {
+            printf("%#4X NULL: NULL\n", i % table->size);
+        }
+    }
+}
+
 static void ws_heap_insert(ws_heap *const table, const ws_int key, const ws_int value) {
-    //find a free spot and insert our value
+    //find a free spot and insert our value, this function is only for internal use
     int hash = ws_int_hash(key);
-    int perturb = hash / table->size;
+    int perturb = hash;
     size_t position = hash % table->size;
     while (table->entries[position].initialized &&
-           !ws_int_cmp(table->entries[position].key, key)) {
-
+           ws_int_compare(table->entries[position].key, key)) {
         position = (position * 5 + 1 + perturb) % table->size;
-        perturb >>= WS_PERTURB_SHIFT;
+        perturb >>= WS_HEAP_PERTURB_SHIFT;
+    }
+    if (!table->entries[position].initialized) {
+        table->length++;
+        table->entries[position].initialized = 1;
     }
     table->entries[position].key = key;
     table->entries[position].value = value;
-    table->entries[position].initialized = 1;
-    table->length++;
 }
 
-static void ws_heap_set(ws_heap *const table, const ws_int key, const ws_int value) {
+void ws_heap_set(ws_heap *const table, const ws_int key, const ws_int value) {
     // check if we'e getting too large, and resize
-    if (WS_RESIZE_TIME(table->length, table->size)) {
+    if (WS_HEAP_RESIZE_TIME(table->length, table->size)) {
 
         // oh boy, resizing. save the old table size and 
         ws_heap_entry *old = table->entries;
@@ -105,17 +117,17 @@ static void ws_heap_set(ws_heap *const table, const ws_int key, const ws_int val
     ws_heap_insert(table, key, value);
 }
 
-static ws_int ws_heap_get(const ws_heap *const table, const ws_int key) {
+ws_int ws_heap_get(const ws_heap *const table, const ws_int key) {
     //find the spot key and return the value
     int hash = ws_int_hash(key);
-    int perturb = hash / table->size;
+    int perturb = hash;
     size_t position = hash % table->size;
     while (table->entries[position].initialized) {
-        if (ws_int_cmp(table->entries[position].key, key)) {
+        if (!ws_int_compare(table->entries[position].key, key)) {
             return table->entries[position].value;
         }
         position = (position * 5 + 1 + perturb) % table->size;
-        perturb >>= WS_PERTURB_SHIFT;
+        perturb >>= WS_HEAP_PERTURB_SHIFT;
     }
     printf("Tried to look up value in the heap at %d which did not exist\n", ws_int_to_int(key));
     exit(EXIT_FAILURE);
@@ -127,7 +139,7 @@ static ws_int ws_heap_get(const ws_heap *const table, const ws_int key) {
 #define WS_STACK_SIZE 1024
 #define WS_STACK_RESIZE_FACTOR 2
 
-static ws_stack *ws_stack_initialize() {
+ws_stack *ws_stack_initialize() {
     ws_stack *result = (ws_stack *)malloc(sizeof(ws_stack));
     result->size = WS_STACK_SIZE;
     result->length = 0;
@@ -135,12 +147,12 @@ static ws_stack *ws_stack_initialize() {
     return result;
 }
 
-static void ws_stack_free(ws_stack *const stack) {
+void ws_stack_free(ws_stack *const stack) {
     free(stack->entries);
     free(stack);
 }
 
-static void ws_stack_print(ws_stack *const stack) {
+void ws_stack_print(ws_stack *const stack) {
     printf("stack contents with length %d:\n", stack->length);
     for (size_t i = 0; i < stack->length; i++) {
         printf("%X\n", ws_int_to_int(stack->entries[i]));
@@ -149,7 +161,7 @@ static void ws_stack_print(ws_stack *const stack) {
 
 
 /* same for the callstack */
-static ws_callstack *ws_callstack_initialize() {
+ws_callstack *ws_callstack_initialize() {
     ws_callstack *result = (ws_callstack *)malloc(sizeof(ws_callstack));
     result->size = WS_STACK_SIZE;
     result->length = 0;
@@ -157,7 +169,7 @@ static ws_callstack *ws_callstack_initialize() {
     return result;
 }
 
-static void ws_callstack_free(ws_callstack *const stack) {
+void ws_callstack_free(ws_callstack *const stack) {
     free(stack->entries);
     free(stack);
 }
@@ -330,6 +342,11 @@ static void ws_command_inputnum(ws_stack *const stack, ws_heap *const heap) {
 }
 
 void ws_execute(const ws_compiled *const program) {
+
+    if (!(program->flags & 0x1)) {
+        printf("This program has not been compiled yet");
+        exit(EXIT_FAILURE);
+    }
     
     // initialize the heap
     ws_heap *heap = ws_heap_initialize();
@@ -344,10 +361,12 @@ void ws_execute(const ws_compiled *const program) {
     ws_command *current_command;
 
     int exitcode = 0;
+    uint64_t commands_executed = 0;
 
     while (!exitcode) {
         current_command = program->commands + next_index;
         next_index++;
+        commands_executed++;
         /*Sleep(500);
         ws_stack_print(stack);
         printf("executing command type: ");
@@ -470,10 +489,12 @@ void ws_execute(const ws_compiled *const program) {
         case 1: //clean exit
             exit(EXIT_SUCCESS);
             break;
+
         case 2: //unsupported command type
             printf("invalid command type\n");
             exit(EXIT_FAILURE);
             break;
+
         case 3: //code index pointer out of bounds
             printf("code index out of bounds\n");
             exit(EXIT_FAILURE);

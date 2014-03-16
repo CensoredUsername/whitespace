@@ -19,10 +19,6 @@ static ws_string serializing_finish(const ws_serializing_buffer dest) {
     return result;
 }
 
-static void serializing_free(const ws_serializing_buffer dest) {
-    free(dest.buffer);
-}
-
 static void reserve_space(ws_serializing_buffer *const dest, const size_t size) {
     while ((dest->index + size) > (dest->length)) {
         dest->length *= 2;
@@ -41,7 +37,7 @@ static void check_space(const ws_serializing_buffer *const source, const size_t 
     }
 }
 
-static void serialize_uchar(const unsigned char number, ws_serializing_buffer *const dest) {
+static void serialize_char(const char number, ws_serializing_buffer *const dest) {
 #if (DEBUG)
     printf("serializing uchar\n");
 #endif
@@ -50,11 +46,11 @@ static void serialize_uchar(const unsigned char number, ws_serializing_buffer *c
     dest->index++;
 }
 
-static unsigned char unserialize_uchar(ws_serializing_buffer *const source) {
+static unsigned char unserialize_char(ws_serializing_buffer *const source) {
 #if (DEBUG)
     printf("unserializing uchar\n");
 #endif
-    unsigned char data;
+    char data;
     check_space(source, 1);
     memcpy(&data, source->buffer + source->index, 1);
     source->index++;
@@ -102,30 +98,32 @@ static int32_t unserialize_int32(ws_serializing_buffer *const source) {
 
 }
 
-static void serialize_string(const ws_string string, ws_serializing_buffer *const dest) {
+static void serialize_label(const ws_label string, ws_serializing_buffer *const dest) {
 #if (DEBUG)
-    printf("serializing string\n");
+    printf("serializing label\n");
 #endif
     serialize_uint32(string.length, dest);
+    size_t length = ws_round8up(string.length);
 
-    reserve_space(dest, string.length);
-    memcpy(dest->buffer+dest->index, string.data, string.length);
-    dest->index += string.length;
+    reserve_space(dest, length);
+    memcpy(dest->buffer+dest->index, string.data, length);
+    dest->index += length;
 }
 
-static ws_string unserialize_string(ws_serializing_buffer *const source) {
+static ws_label unserialize_label(ws_serializing_buffer *const source) {
 #if (DEBUG)
-    printf("unserializing string\n");
+    printf("unserializing label\n");
 #endif
-    ws_string string;
+    ws_label string;
 
     string.length = unserialize_uint32(source);
+    size_t length = ws_round8up(string.length);
+    string.data = (char *)malloc(length);
 
-    check_space(source, string.length);
-    string.data = source->buffer + source->index;
-
+    check_space(source, length);
+    memcpy(string.data, source->buffer + source->index, length);
     source->index += string.length;
-    return ws_strcpy(string);
+    return string;
 }
 
 static void serialize_ws_int(const ws_int number, ws_serializing_buffer *const dest) {
@@ -137,46 +135,55 @@ static ws_int unserialize_ws_int(ws_serializing_buffer *const source) {
 }
 
 static void serialize_command(const ws_command *const command, const int compiled, ws_serializing_buffer *const dest) {
-    serialize_uint32(command->type, dest);
+#if DEBUG
+    serialize_char(0xff, dest);
+#endif
+    serialize_char(command->type, dest);
     if (ws_parameter_map[command->type]) {
         serialize_ws_int(command->parameter, dest);
     } else if (ws_label_map[command->type]) {
         if (compiled) {
             serialize_uint32(command->jumpoffset, dest);
         } else {
-            serialize_string(command->label, dest);
+            serialize_label(command->label, dest);
         }
     }
 }
 
 static void unserialize_command(ws_command *const command, const int compiled, ws_serializing_buffer *const source) {
-    command->type = unserialize_uint32(source);
+#if DEBUG
+    if (unserialize_char(source) != 0xff) {
+        printf("expected new command while serializing");
+        exit(EXIT_FAILURE);
+    }
+#endif
+    command->type = unserialize_char(source);
     if (ws_parameter_map[command->type]) {
         command->parameter = unserialize_ws_int(source);
     } else if (ws_label_map[command->type]) {
         if (compiled) {
             command->jumpoffset = unserialize_uint32(source);
         } else {
-            command->label = unserialize_string(source);
+            command->label = unserialize_label(source);
         }
     }
 }
 
 static void serialize_program(const ws_parsed *const program, ws_serializing_buffer *const dest) {
-    serialize_int32(program->compiled, dest);
+    serialize_int32(program->flags, dest);
     serialize_uint32(program->length, dest);
     for (size_t i = 0; i < (program->length); i++) {
-        serialize_command(program->commands + i, program->compiled, dest);
+        serialize_command(program->commands + i, program->flags & 0x1, dest);
     }
 }
 
 static ws_parsed *unserialize_program(ws_serializing_buffer *const source) {
-    const int compiled = unserialize_int32(source);
+    const int flags = unserialize_int32(source);
     const size_t length = unserialize_uint32(source);
     ws_parsed *const program = ws_parsed_alloc(length);
-    program->compiled = compiled;
+    program->flags = flags;
     for(size_t i = 0; i < program->length; i++) {
-        unserialize_command(program->commands + i, compiled, source);
+        unserialize_command(program->commands + i, flags & 0x1, source);
     }
     return program;
 }
