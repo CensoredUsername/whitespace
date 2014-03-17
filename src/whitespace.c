@@ -32,24 +32,28 @@ int main(int argc, char **argv) {
     data.length = fread(data.data, 1, wssize, wsfile);
     fclose(wsfile);
 
-    ws_program *a = ws_parse(data);
-    ws_string_free(data);
+    ws_program program;
+    ws_parse(&program, &data);
+    ws_string_free(&data);
 
     size_t length =strlen(argv[1]);
     char *compiledname = (char *)malloc(length+2);
     memcpy(compiledname, argv[1], length);
     memcpy(compiledname + length, "c\0", 2);
 
-    ws_string serialized = ws_serialize(a);
+    ws_string serialized;
+    ws_serialize(&serialized, &program);
+
     FILE *wscfile = fopen(compiledname, "wb");
     fwrite(serialized.data, serialized.length, 1, wscfile);
     fclose(wscfile);
-    ws_string_free(serialized);
 
-    ws_compile(a);
+    ws_string_free(&serialized);
 
-    ws_execute(a);
-    ws_program_free(a);
+    ws_compile(&program);
+
+    ws_execute(&program);
+    ws_program_finish(&program);
 
     return 0;
 }

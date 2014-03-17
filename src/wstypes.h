@@ -7,6 +7,12 @@
 #include <stdio.h>
 #include <stdint.h>
 
+#define DEBUG 0
+
+#define SPACE ' '
+#define TAB '\t'
+#define BREAK '\n'
+
 #define ws_hash_prime 1000003
 
 //the constants used to indicate the type of ws command the current node has
@@ -82,49 +88,48 @@ typedef struct {
 
 /* Helper functions for dealining with the ws_string struct. 
  * This struct is mostly just syntactic sugar for a char arran and size_t length
- * Just copy them around, they're tiny anyway.
  */
-ws_string ws_string_fromchar(char *const buffer, const size_t length){
-    const ws_string string = {buffer, length};
-    return string;
+void ws_string_fromchar(ws_string *const output, char *const buffer, const size_t length){
+    output->data = buffer;
+    output->length = length;
 }
 
-ws_string ws_strcpy(const ws_string old) {
-    char *const buffer = malloc(old.length);
-    memcpy(buffer, old.data, old.length);
-    ws_string result = {buffer, old.length};
-    return result;
+void ws_strcpy(ws_string *const result, const ws_string *const old) {
+    char *const buffer = malloc(old->length);
+    memcpy(buffer, old->data, old->length);
+    result->data = buffer;
+    result->length = old->length;
 }
 
-void ws_string_free(const ws_string old) {
-    free(old.data);
+void ws_string_free(const ws_string *const input) {
+    free(input->data);
 }
 
-void ws_string_print(const ws_string text) {
-    for(size_t i = 0; i < text.length; i++) {
-        putchar(text.data[i]);
+void ws_string_print(const ws_string *const text) {
+    for(size_t i = 0; i < text->length; i++) {
+        putchar(text->data[i]);
     }
 }
 
-unsigned int ws_string_hash(const ws_string input) {
+unsigned int ws_string_hash(const ws_string *const input) {
     /* a very simple hashing function. it is primarily meant to be fast, collision resolution does the rest
      * similar to cpythons string hashing function.
      */
-    if (!input.length) {
+    if (!input->length) {
         return 0;
     }
-    unsigned int value = input.data[0] << 7;
-    for(size_t i = 0; i < input.length; i++) {
-        value = (value * ws_hash_prime) ^ input.data[i];
+    unsigned int value = input->data[0] << 7;
+    for(size_t i = 0; i < input->length; i++) {
+        value = (value * ws_hash_prime) ^ input->data[i];
     }
-    return value ^ input.length;
+    return value ^ input->length;
 }
 
-int ws_string_compare(const ws_string a, const ws_string b) {
-    if (a.length != b.length) {
+int ws_string_compare(const ws_string *const a, const ws_string *const b) {
+    if (a->length != b->length) {
         return -1;
     }
-    return memcmp(a.data, b.data, a.length);
+    return memcmp(a->data, b->data, a->length);
 }
 
 
@@ -135,46 +140,46 @@ int ws_string_compare(const ws_string a, const ws_string b) {
  */
 #define ws_round8up(x) ((x)/8 + !!((x)%8) + (!x))
 
-ws_label ws_label_from_whitespace(const ws_string old) {
+void ws_label_from_whitespace(ws_label *const result, const ws_string *const old) {
     //criteria for the return string. length is at least 1, or len(old)/8 rounded up
-    size_t byte_length = ws_round8up(old.length);
-    ws_label result = {(char *)malloc(byte_length), old.length};
-    memset(result.data, 0, byte_length);
+    size_t byte_length = ws_round8up(old->length);
+    result->length = old->length;
+    result->data = (char *)malloc(byte_length);
+    memset(result->data, 0, byte_length);
     
-    for(size_t i = 0; i < old.length; i++) {
-        result.data[byte_length - 1 - i/8] |= ((old.data[result.length - 1 - i] == SPACE)? 0: 1) << (i%8);
+    for(size_t i = 0; i < old->length; i++) {
+        result->data[byte_length - 1 - i/8] |= ((old->data[result->length - 1 - i] == SPACE)? 0: 1) << (i%8);
     }
-    return result;
 }
 
-void ws_label_print(const ws_label input) {
-    size_t length = ws_round8up(input.length);
+void ws_label_print(const ws_label *const input) {
+    size_t length = ws_round8up(input->length);
     for(size_t i = 0; i < length; i++) {
-        putchar(input.data[i]);
+        putchar(input->data[i]);
     }
 }
 
-void ws_label_free(const ws_label input) {
-    free(input.data);
+void ws_label_free(const ws_label *const input) {
+    free(input->data);
 }
 
-unsigned int ws_label_hash(const ws_label input) {
+unsigned int ws_label_hash(const ws_label *const input) {
     /* An adapted version of the string hashing function
      */
-    size_t length = ws_round8up(input.length);
-    unsigned int value = input.data[0] << 7; // [0] always exists
+    size_t length = ws_round8up(input->length);
+    unsigned int value = input->data[0] << 7; // [0] always exists
 
     for(size_t i = 0; i < length; i++) {
-        value = (value*ws_hash_prime) ^ input.data[i];
+        value = (value*ws_hash_prime) ^ input->data[i];
     }
-    return value ^ input.length;
+    return value ^ input->length;
 }
 
-int ws_label_compare(const ws_label a, const ws_label b) {
-    if (a.length != b.length) {
+int ws_label_compare(const ws_label *const a, const ws_label *const b) {
+    if (a->length != b->length) {
         return -1;
     }
-    return memcmp(a.data, b.data, ws_round8up(a.length));
+    return memcmp(a->data, b->data, ws_round8up(a->length));
 }
 
 
@@ -184,153 +189,153 @@ int ws_label_compare(const ws_label a, const ws_label b) {
  * If length is zero, then data is just an int. This is mainly for speed reasons
  * Else, digits will be an array of something holding the value
  */
-void ws_int_free(const ws_int input) {
+void ws_int_free(const ws_int *const input) {
     //current implementation of ws_int doesn't allocate anything dynamically
-    if(input.length) {
-        free(input.digits);
+    if(input->length) {
+        free(input->digits);
     }
 }
 
-ws_int ws_int_copy(const ws_int input) {
-    if (input.length) {
-        printf("length: %d ", input.length);
+void ws_int_copy(ws_int *const result, const ws_int *const input) {
+    if (input->length) {
+        printf("length: %d ", input->length);
         printf("bigint not yet supported in copy\n");
     }
-    return input;
+    *result = *input;
 }
 
-ws_int ws_int_from_int(const int input) {
-    ws_int result;
-    result.length = 0;
-    result.data = input;
-    return result;
+void ws_int_from_int(ws_int *const result, const int input) {
+    result->length = 0;
+    result->data = input;
 }
 
-ws_int ws_int_from_whitespace(const ws_string string) {
+void ws_int_from_whitespace(ws_int *const result, const ws_string *const string) {
     
     //protect against empty parameters or sign only parameters
-    if(string.length < 2) {
-        return ws_int_from_int(0);
+    if(string->length < 2) {
+        ws_int_from_int(result, 0);
+        return;
     }
 
     int accumulator = 0;
-    size_t datalength = string.length-1;
+    size_t datalength = string->length-1;
     // note that since whitespace uses ones complement while we use twos complement, all 32 long whiespace 
     // parameters are valid ints
     if (datalength > 31) { 
         printf("overflow in creating ws_int");
         exit(EXIT_FAILURE);
     }
-    if (string.data[0] == SPACE) { //positive
+    if (string->data[0] == SPACE) { //positive
         for(size_t i = datalength; i > 0; i--) {
-            accumulator += (string.data[i] == TAB) << (datalength-i);
+            accumulator += (string->data[i] == TAB) << (datalength-i);
         }
     } else {
         for(size_t i = datalength; i > 0; i--) {
-            accumulator -= (string.data[i] == TAB) << (datalength-i);
+            accumulator -= (string->data[i] == TAB) << (datalength-i);
         }
     }
 
-    return ws_int_from_int(accumulator);
+    ws_int_from_int(result, accumulator);
+    return;
 }
 
-int ws_int_to_int(const ws_int input) {
-    if (input.length) {
-        printf("length: %d ", input.length);
+int ws_int_to_int(const ws_int *const input) {
+    if (input->length) {
+        printf("length: %d ", input->length);
         printf("bigint not yet supported\n");
     }
-    return input.data;
+    return input->data;
 }
 
-void ws_int_print(const ws_int input) {
-    if (input.length) {
-        printf("length: %d ", input.length);
+void ws_int_print(const ws_int *const input) {
+    if (input->length) {
+        printf("length: %d ", input->length);
         printf("bigint not yet supported\n");
     }
-    printf("%d", input.data);
+    printf("%d", input->data);
 }
 
-ws_int ws_int_input() {
+void ws_int_input(ws_int *const result) {
     int input;
     scanf("%d", &input);
-    return ws_int_from_int(input);
+    ws_int_from_int(result, input);
 }
 
-unsigned int ws_int_hash(const ws_int input) {
-    if (input.length) {
-        printf("length: %d ", input.length);
+unsigned int ws_int_hash(const ws_int *const input) {
+    if (input->length) {
+        printf("length: %d ", input->length);
         printf("bigint not yet supported\n");
     }
-    return (unsigned int)input.data;
+    return (unsigned int)input->data;
 }
 
-int ws_int_compare(const ws_int left, const ws_int right) {
-    if (left.length || right.length) {
-        printf("length: %d %d ", left.length, right.length);
+int ws_int_compare(const ws_int *const left, const ws_int *const right) {
+    if (left->length || right->length) {
+        printf("length: %d %d ", left->length, right->length);
         printf("bigint not yet supported\n");
     }
-    return left.data != right.data;
+    return left->data != right->data;
 }
 
-ws_int ws_int_multiply(const ws_int left, const ws_int right) {
-    if (left.length || right.length) {
-        printf("length: %d %d ", left.length, right.length);
+void ws_int_multiply(ws_int *const result, const ws_int *const left, const ws_int *const right) {
+    if (left->length || right->length) {
+        printf("length: %d %d ", left->length, right->length);
         printf("bigint not yet supported\n");
     }
-    ws_int result = {0, {left.data * right.data}};
-    return result;
+    result->length = 0;
+    result->data = left->data * right->data;
 }
 
-ws_int ws_int_divide(const ws_int left, const ws_int right) {
-    if (left.length || right.length) {
-        printf("length: %d %d ", left.length, right.length);
+void ws_int_divide(ws_int *const result, const ws_int *const left, const ws_int *const right) {
+    if (left->length || right->length) {
+        printf("length: %d %d ", left->length, right->length);
         printf("bigint not yet supported\n");
     }
-    ws_int result = {0, {left.data / right.data}};
-    return result;
+    result->length = 0;
+    result->data = left->data / right->data;
 }
 
-ws_int ws_int_modulo(const ws_int left, const ws_int right) {
-    if (left.length || right.length) {
-        printf("length: %d %d ", left.length, right.length);
+void ws_int_modulo(ws_int *const result, const ws_int *const left, const ws_int *const right) {
+    if (left->length || right->length) {
+        printf("length: %d %d ", left->length, right->length);
         printf("bigint not yet supported\n");
     }
-    ws_int result = {0, {left.data % right.data}};
-    return result;
+    result->length = 0;
+    result->data = left->data % right->data;
 }
 
-ws_int ws_int_add(const ws_int left, const ws_int right) {
-    if (left.length || right.length) {
-        printf("length: %d %d ", left.length, right.length);
+void ws_int_add(ws_int *const result, const ws_int *const left, const ws_int *const right) {
+    if (left->length || right->length) {
+        printf("length: %d %d ", left->length, right->length);
         printf("bigint not yet supported\n");
     }
-    ws_int result = {0, {left.data + right.data}};
-    return result;
+    result->length = 0;
+    result->data = left->data + right->data;
 }
 
-ws_int ws_int_subtract(const ws_int left, const ws_int right) {
-    if (left.length || right.length) {
-        printf("length: %d %d ", left.length, right.length);
+void ws_int_subtract(ws_int *const result, const ws_int *const left, const ws_int *const right) {
+    if (left->length || right->length) {
+        printf("length: %d %d ", left->length, right->length);
         printf("bigint not yet supported\n");
     }
-    ws_int result = {0, {left.data - right.data}};
-    return result;
+    result->length = 0;
+    result->data = left->data - right->data;
 }
 
-int ws_int_iszero(const ws_int input) {
-    if (input.length) {
-        printf("length: %d ", input.length);
+int ws_int_iszero(const ws_int *const input) {
+    if (input->length) {
+        printf("length: %d ", input->length);
         printf("bigint not yet supported\n");
     }
-    return input.data == 0;
+    return input->data == 0;
 }
 
-int ws_int_isnegative(const ws_int input) {
-    if (input.length) {
-        printf("length: %d ", input.length);
+int ws_int_isnegative(const ws_int *const input) {
+    if (input->length) {
+        printf("length: %d ", input->length);
         printf("bigint not yet supported\n");
     }
-    return input.data < 0;
+    return input->data < 0;
 }
 
 #endif

@@ -3,10 +3,11 @@
 /* the main task of compiling is to replace the goto labels by indexes of the actual label */
 
 #include "wstypes.h"
-#include "wsparser.h"
 
 #define WS_JUMPOFFSETS_SIZE 32
 #define WS_JUMPOFFSETS_RESIZE 2
+
+
 
 /* compiling is done in two steps.
  * first, iterate over the entire program, storing all indexes which have labels, and adding the index
@@ -32,10 +33,10 @@ typedef struct {
 
 /* forward declarations
  */
-static ws_map *ws_map_initialize();
-static int ws_map_set(ws_map *, ws_label, size_t);
-static int ws_map_get(const ws_map *, ws_label);
-static void ws_map_free(ws_map *);
+static void ws_map_initialize(ws_map *);
+static int ws_map_set(ws_map *, const ws_label *, const size_t);
+static int ws_map_get(const ws_map *, const ws_label *);
+static void ws_map_finish(ws_map *);
 
 
 
@@ -53,7 +54,8 @@ void ws_compile(ws_program *const parsed) {
     int offset;
     ws_command *current_command;
 
-    ws_map *const map = ws_map_initialize();
+    ws_map map;
+    ws_map_initialize(&map);
 
     for(size_t i = 0; i < parsed->length; i++) {
         current_command = parsed->commands + i;
@@ -61,7 +63,7 @@ void ws_compile(ws_program *const parsed) {
         if (current_command->type == label) {
 
             // insert the label offset into the hashmap
-            if (ws_map_set(map, current_command->label, i)) {
+            if (ws_map_set(&map, &current_command->label, i)) {
 
                 printf("duplicate label found at command %d\n", i);
                 exit(EXIT_FAILURE);
@@ -84,7 +86,7 @@ void ws_compile(ws_program *const parsed) {
     //for each of the jump/calls, replace the label by 
     for(size_t i = 0; i < jump_offsets_length; i++) {
         current_command = parsed->commands + jump_offsets[i];
-        offset = ws_map_get(map, current_command->label);
+        offset = ws_map_get(&map, &current_command->label);
 
         if (offset < 0) {
             printf("label not found at command %d\n", jump_offsets[i]);
@@ -93,7 +95,7 @@ void ws_compile(ws_program *const parsed) {
         current_command->jumpoffset = offset;
     }
 
-    ws_map_free(map); //note, this frees all the old label strings too because I didn't copy the char *'s.
+    ws_map_finish(&map); //note, this frees all the old label strings too because I didn't copy the char *'s.
     free(jump_offsets);
 
     parsed->flags |= 0x1;
@@ -109,25 +111,22 @@ void ws_compile(ws_program *const parsed) {
 #define WS_MAP_RESIZE_TIME(length, size) (((length)+1)*3 > (size)*2)
 #define WS_MAP_PERTURB_SHIFT 5
 
-static ws_map *ws_map_initialize() {
-    ws_map *const map = (ws_map *)malloc(sizeof(ws_map));
+static void ws_map_initialize(ws_map *const map) {
     map->size = WS_MAP_SIZE;
     map->length = 0;
     map->entries = (ws_map_entry *)malloc(sizeof(ws_map_entry) * WS_MAP_SIZE);
     for(size_t i = 0; i < WS_MAP_SIZE; i++) {
         map->entries[i].initialized = 0;
     }
-    return map;
 }
 
-static void ws_map_free(ws_map *const map) {
+static void ws_map_finish(ws_map *const map) {
     for(size_t i = 0; i < map->size; i++) {
         if (map->entries[i].initialized) {
-            ws_label_free(map->entries[i].key);
+            ws_label_free(&map->entries[i].key);
         }  
     }
     free(map->entries);
-    free(map);
 }
 
 static void ws_map_print(ws_map *const map) {
@@ -135,7 +134,7 @@ static void ws_map_print(ws_map *const map) {
     for(size_t i = 0; i < map->size; i++) {
         if (map->entries[i].initialized) {
             printf("%#4X ", i % map->size);
-            ws_label_print(map->entries[i].key);
+            ws_label_print(&map->entries[i].key);
             printf(": %4d\n", map->entries[i].value);
         } else {
             printf("%#4X NULL: NULL\n", i % map->size);
@@ -143,13 +142,13 @@ static void ws_map_print(ws_map *const map) {
     }
 }
 
-static int ws_map_insert(ws_map *const map, const ws_label key, const int value) {
+static int ws_map_insert(ws_map *const map, const ws_label *const key, const int value) {
 
     unsigned int hash = ws_label_hash(key);
     unsigned int perturb = hash;
     size_t position = hash % map->size;
     while (map->entries[position].initialized &&
-           ws_label_compare(map->entries[position].key, key)) {
+           ws_label_compare(&map->entries[position].key, key)) {
         position = (position * 5 + 1 + perturb) % map->size;
         perturb >>= WS_MAP_PERTURB_SHIFT;
     }
@@ -157,13 +156,13 @@ static int ws_map_insert(ws_map *const map, const ws_label key, const int value)
         return -1;
     }
     map->entries[position].initialized = 1;
-    map->entries[position].key = key;
+    map->entries[position].key = *key; //not ws_string_copying here since he char * should be freed
     map->entries[position].value = value;
     map->length++;
     return 0;
 }
 
-static int ws_map_set(ws_map *const map, const ws_label key, const size_t value) {
+static int ws_map_set(ws_map *const map, const ws_label *const key, const size_t value) {
     // check if we should resize
     if (WS_MAP_RESIZE_TIME(map->length, map->size)) {
 
@@ -180,7 +179,7 @@ static int ws_map_set(ws_map *const map, const ws_label key, const size_t value)
 
         for(size_t i = 0; i < old_size; i++) {
             if (old[i].initialized) {
-                ws_map_insert(map, old[i].key, old[i].value);
+                ws_map_insert(map, &old[i].key, old[i].value);
             }
         }
 
@@ -190,13 +189,13 @@ static int ws_map_set(ws_map *const map, const ws_label key, const size_t value)
     return ws_map_insert(map, key, value);
 }
 
-static int ws_map_get(const ws_map *const map, const ws_label key) {
+static int ws_map_get(const ws_map *const map, const ws_label *const key) {
 
     unsigned int hash = ws_label_hash(key);
     unsigned int perturb = hash;
     size_t position = hash % map->size;
     while (map->entries[position].initialized) {
-        if (!ws_label_compare(map->entries[position].key, key)) {
+        if (!ws_label_compare(&map->entries[position].key, key)) {
             return map->entries[position].value;
         }
         position = (position * 5 + 1 + perturb) % map->size;

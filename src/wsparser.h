@@ -9,7 +9,6 @@
 #define COMMAND_ARRAY_RESIZE 2
 
 #include "wstypes.h"
-#include "whitespace.h"
 
 
 
@@ -97,15 +96,15 @@ const char ws_label_map[COMMANDLENGTH] = {
 
 /* Forward declarations
  */
-void ws_visualize(ws_string);
-ws_program *ws_program_alloc(size_t);
+void ws_visualize(ws_string *);
+void ws_program_initialize(ws_program *, size_t);
 void ws_program_free(ws_program *);
 
 
 
 /* The actual parser implementation
  */
-ws_program *ws_parse(const ws_string text) {
+void ws_parse(ws_program *const program, const ws_string *const text) {
 
     ws_command *command_array = (ws_command *)malloc(sizeof(ws_command)*COMMAND_ARRAY_SIZE);
     ws_command *current_node;
@@ -118,6 +117,7 @@ ws_program *ws_parse(const ws_string text) {
 
     size_t parameter_start;
     size_t parameter_end;
+    char *parameter_end_loc;
     size_t parameter_max_size = PARAMETER_CACHE_SIZE;
     ws_string current_parameter = {(char *)malloc(PARAMETER_CACHE_SIZE), 0};
     size_t current_parameter_size;
@@ -126,8 +126,8 @@ ws_program *ws_parse(const ws_string text) {
     ws_string debug_text;
 #endif
 
-    size_t i = 0;
-    while (i < text.length) {
+    register size_t i = 0;
+    while (i < text->length) {
         //this is the node to be set up
         current_node = command_array + command_array_length;
 
@@ -137,7 +137,7 @@ ws_program *ws_parse(const ws_string text) {
         while (!succes) {
 
             //check if we're not running out of bounds
-            if (i == text.length) {
+            if (i == text->length) {
                 printf("end of buffer while parsing command at position %d\n", i);
                 exit(EXIT_FAILURE);
             }
@@ -149,12 +149,12 @@ ws_program *ws_parse(const ws_string text) {
             }
 
             //comments
-            if (text.data[i] != SPACE && text.data[i] != TAB && text.data[i] != BREAK) {
+            if (text->data[i] != SPACE && text->data[i] != TAB && text->data[i] != BREAK) {
                 i++;
                 continue;
             }
 
-            current_command.data[current_command.length++] = text.data[i++];
+            current_command.data[current_command.length++] = text->data[i++];
 
             //check if we have a command, commands have at least length 2 and at most length 4
             if (current_command.length == 1) {
@@ -163,7 +163,7 @@ ws_program *ws_parse(const ws_string text) {
 
             for(size_t j = 0; j < COMMANDLENGTH; j++) {
 
-                if (!ws_string_compare(ws_command_map[j], current_command)) {
+                if (!ws_string_compare(ws_command_map+j, &current_command)) {
                     current_node->type = j;
                     succes = 1;
                     break;
@@ -176,11 +176,12 @@ ws_program *ws_parse(const ws_string text) {
             parameter_start = i;
 
             //figure out the size of the parameter
-            parameter_end = (size_t)((char *)memchr(text.data + parameter_start, BREAK, text.length - parameter_start) - text.data);
-            if (!parameter_end) {
+            parameter_end_loc = (char *)memchr(text->data + parameter_start, BREAK, text->length - parameter_start);
+            if (!parameter_end_loc) {
                 printf("end of buffer while parsing parameter at position %d\n", parameter_start);
                 exit(EXIT_FAILURE);
             }
+            parameter_end = (size_t)(parameter_end_loc - text->data);
             current_parameter_size = parameter_end - parameter_start + 1; //include the newline in here!
 
             //if our buffer isn't large enough, make it larger to fit
@@ -192,8 +193,8 @@ ws_program *ws_parse(const ws_string text) {
             //we know we can safely collect the characters of the parameter now
             current_parameter.length = 0;
             for(; i < (parameter_start + current_parameter_size); i++) {
-                if (text.data[i] == SPACE || text.data[i] == TAB || text.data[i] == BREAK) {
-                    current_parameter.data[current_parameter.length++] = text.data[i];
+                if (text->data[i] == SPACE || text->data[i] == TAB || text->data[i] == BREAK) {
+                    current_parameter.data[current_parameter.length++] = text->data[i];
                 }
             }
 
@@ -201,9 +202,9 @@ ws_program *ws_parse(const ws_string text) {
 
             //parse the parameters into their data structures
             if (ws_label_map[current_node->type]) {
-                current_node->label = ws_label_from_whitespace(current_parameter);
+                ws_label_from_whitespace(&(current_node->label), &current_parameter);
             } else {
-                current_node->parameter = ws_int_from_whitespace(current_parameter);
+                ws_int_from_whitespace(&(current_node->parameter), &current_parameter);
             }
 #if DEBUG
             //if we're debugging, create new strings holding the whole whitespace code
@@ -212,16 +213,16 @@ ws_program *ws_parse(const ws_string text) {
 
             memcpy(debug_text.data, current_command.data, current_command.length);
             memcpy(debug_text.data + current_command.length, current_parameter.data , current_parameter.length + 1);
-            ws_visualize(debug_text);
         } else {
-            debug_text = ws_strcpy(current_command);
-            ws_visualize(debug_text);
+            ws_strcpy(&debug_text, &current_command);
+            
         }
 
         //these are added to the node and printed
+        ws_visualize(&debug_text);
         current_node->text = debug_text;
         printf("%s: ", ws_command_names[current_node->type]);
-        ws_string_print(debug_text);
+        ws_string_print(&debug_text);
         putchar('\n');
 #else
         }
@@ -230,78 +231,71 @@ ws_program *ws_parse(const ws_string text) {
         command_array_length++;
 
         //read till we encounter a new whitespace character
-        while (i != text.length && (text.data[i] != SPACE && text.data[i] != TAB && text.data[i] != BREAK)) {
+        while (i != text->length && (text->data[i] != SPACE && text->data[i] != TAB && text->data[i] != BREAK)) {
             i++;
-            if (i == text.length) {
-                break;
-            }
         }
         
         //if we get here we're expecting a new whitespace command but we've maxed out our array
         if (command_array_size == command_array_length) {
             command_array_size *= COMMAND_ARRAY_RESIZE;
-            command_array = (ws_command *)realloc(command_array, sizeof(ws_command)*command_array_size);
+            command_array = (ws_command *)realloc(command_array, sizeof(ws_command) * command_array_size);
         }
     }
 
     //put the program together and clean up
-    ws_string_free(current_parameter);
+    ws_string_free(&current_parameter);
 
     if (!command_array_length) {
         printf("empty program\n");
         exit(EXIT_FAILURE);
     }
 
-    ws_program *program = ws_program_alloc(0);
+    ws_program_initialize(program, 0);
     program->commands = (ws_command *)realloc(command_array, sizeof(ws_command)*command_array_length);
     program->length = command_array_length;
-    return program;
 }
 
-void ws_visualize(const ws_string string) {
-    for(size_t i = 0; i < string.length; i++) {
-        switch (string.data[i]) {
+void ws_visualize(ws_string *const string) {
+    for(size_t i = 0; i < string->length; i++) {
+        switch (string->data[i]) {
             case SPACE:
-                string.data[i] = 'S';
+                string->data[i] = 'S';
                 break;
             case TAB:
-                string.data[i] = 'T';
+                string->data[i] = 'T';
                 break;
             case BREAK:
-                string.data[i] = 'N';
+                string->data[i] = 'N';
                 break;
         }
     }
 }
 
-ws_program *ws_program_alloc(const size_t commandno) {
-    ws_program *const result = (ws_program *)malloc(sizeof(ws_program));
+void ws_program_initialize(ws_program *const result, const size_t commandno) {
     if (commandno) {
         result->commands = malloc(sizeof(ws_command) * commandno);
     }
     result->length = commandno;
-    result->flags = 0;
-    return result;
+    result->flags = 'W'<<24 | 'S'<<16 | 'C'<<8 | '\0';
 }
 
-void ws_program_free(ws_program *const program) {
+void ws_program_finish(const ws_program *const program) {
     //free the program, commands, label strings and ws_ints
     ws_command *command;
     for(size_t i = 0; i < program->length; i++){
         command = program->commands + i;
 
         if (ws_parameter_map[command->type]) {
-            ws_int_free(command->parameter);
+            ws_int_free(&command->parameter);
 
         } else if (ws_label_map[command->type] && !(program->flags & 0x1)) {
-            ws_label_free(command->label);
+            ws_label_free(&command->label);
         }
 #if DEBUG
-        ws_string_free(command->text);
+        ws_string_free(&command->text);
 #endif
         free(command);
     }
-    free(program);
 }
 
 #endif

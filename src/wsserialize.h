@@ -6,6 +6,8 @@
 
 #include "wstypes.h"
 
+
+
 //the buffer used when serializing
 typedef struct {
     size_t length;
@@ -19,17 +21,15 @@ typedef struct {
  * Is provided, and finally the functions to serialize and unserialize the whole
  * thing
  */
-static ws_serializing_buffer serializing_buffer() {
-    ws_serializing_buffer dest;
-    dest.length = SERIALIZING_BUFFER_SIZE;
-    dest.buffer = (char *)malloc(SERIALIZING_BUFFER_SIZE);
-    dest.index = 0;
-    return dest;
+static void serializing_buffer_initialize(ws_serializing_buffer *const dest) {
+    dest->length = SERIALIZING_BUFFER_SIZE;
+    dest->buffer = (char *)malloc(SERIALIZING_BUFFER_SIZE);
+    dest->index = 0;
 }
 
-static ws_string serializing_finish(const ws_serializing_buffer dest) {
-    ws_string result = {(char *)realloc(dest.buffer, dest.index), dest.index};
-    return result;
+static void serializing_buffer_finish(ws_string *const result, const ws_serializing_buffer *const dest) {
+    result->data = (char *)realloc(dest->buffer, dest->index);
+    result->length = dest->index;
 }
 
 static void reserve_space(ws_serializing_buffer *const dest, const size_t size) {
@@ -200,29 +200,29 @@ static void serialize_program(const ws_program *const program, ws_serializing_bu
     }
 }
 
-static ws_program *unserialize_program(ws_serializing_buffer *const source) {
+static void unserialize_program(ws_program *const program, ws_serializing_buffer *const source) {
     const int flags = unserialize_int32(source);
     const size_t length = unserialize_uint32(source);
-    ws_program *const program = ws_program_alloc(length);
+    ws_program_initialize(program, length);
     program->flags = flags;
     for(size_t i = 0; i < program->length; i++) {
         unserialize_command(program->commands + i, flags & 0x1, source);
     }
-    return program;
 }
 
 
 
 
-ws_string ws_serialize(const ws_program *const program) {
-    ws_serializing_buffer dest = serializing_buffer(NULL);
+void ws_serialize(ws_string *buffer, const ws_program *const program) {
+    ws_serializing_buffer dest;
+    serializing_buffer_initialize(&dest);
     serialize_program(program, &dest);
-    return serializing_finish(dest);
+    serializing_buffer_finish(buffer, &dest);
 }
 
-ws_program *ws_unserialize(const ws_string buffer) {
-    ws_serializing_buffer source = {buffer.length, buffer.data, 0};
-    return unserialize_program(&source);
+void ws_unserialize(ws_program *const program, const ws_string *const buffer) {
+    ws_serializing_buffer source = {buffer->length, buffer->data, 0};
+    unserialize_program(program, &source);
 }
 
 #endif

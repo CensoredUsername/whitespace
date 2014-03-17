@@ -2,12 +2,6 @@
 #ifndef WHITESPACE_H
 #define WHITESPACE_H
 
-#define DEBUG 0
-
-#define SPACE ' '
-#define TAB '\t'
-#define BREAK '\n'
-
 #include "wstypes.h"
 #include "wsparser.h"
 #include "wsserialize.h"
