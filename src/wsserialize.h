@@ -111,50 +111,54 @@ static int32_t unserialize_int32(ws_serializing_buffer *const source) {
 
 }
 
-static void serialize_label(const ws_label string, ws_serializing_buffer *const dest) {
+static void serialize_label(const ws_label *const string, ws_serializing_buffer *const dest) {
 #if (DEBUG)
     printf("serializing label\n");
 #endif
-    serialize_uint32(string.length, dest);
-    size_t length = ws_round8up(string.length);
+    serialize_uint32(string->length, dest);
+    size_t length = ws_round8up(string->length);
 
     reserve_space(dest, length);
-    memcpy(dest->buffer+dest->index, string.data, length);
+    memcpy(dest->buffer+dest->index, string->data, length);
     dest->index += length;
 }
 
-static ws_label unserialize_label(ws_serializing_buffer *const source) {
+static void unserialize_label(ws_label *const string, ws_serializing_buffer *const source) {
 #if (DEBUG)
     printf("unserializing label\n");
 #endif
-    ws_label string;
-
-    string.length = unserialize_uint32(source);
-    size_t length = ws_round8up(string.length);
-    string.data = (char *)malloc(length);
+    string->length = unserialize_uint32(source);
+    size_t length = ws_round8up(string->length);
+    string->data = (char *)malloc(length);
 
     check_space(source, length);
-    memcpy(string.data, source->buffer + source->index, length);
-    source->index += string.length;
-    return string;
+    memcpy(string->data, source->buffer + source->index, length);
+    source->index += string->length;
 }
 
-static void serialize_ws_int(const ws_int number, ws_serializing_buffer *const dest) {
-    if (number.length) {
-        printf("bigint not yet supported\n");
+static void serialize_ws_int(const ws_int *const number, ws_serializing_buffer *const dest) {
+    serialize_uint32(number->length, dest);
+    size_t length = number->length;
+    if (number->length) {
+        for (size_t i = 0; i < length; i++) {
+            serialize_uint32(number->digits[i], dest);
+        }
+    } else {
+        serialize_int32(number->data, dest);
     }
-    serialize_uint32(number.length, dest);
-    serialize_int32(number.data, dest);
 }
 
-static ws_int unserialize_ws_int(ws_serializing_buffer *const source) {
-    ws_int result;
-    result.length = unserialize_uint32(source);
-    if (result.length) {
-        printf("bigint not yet supported\n");
+static void unserialize_ws_int(ws_int *const result, ws_serializing_buffer *const source) {
+    result->length = unserialize_uint32(source);
+    size_t length = ACTLEN(result->length);
+    result->digits = (digit *)malloc(sizeof(digit) * length);
+    if (result->length) {
+        for (size_t i = 0; i < length; i++) {
+            result->digits[i] = unserialize_uint32(source);
+        }
+    } else {
+        result->data = unserialize_int32(source);
     }
-    result.data = unserialize_int32(source);
-    return result;
 }
 
 static void serialize_command(const ws_command *const command, const int compiled, ws_serializing_buffer *const dest) {
@@ -163,12 +167,12 @@ static void serialize_command(const ws_command *const command, const int compile
 #endif
     serialize_char(command->type, dest);
     if (ws_parameter_map[command->type]) {
-        serialize_ws_int(command->parameter, dest);
+        serialize_ws_int(&command->parameter, dest);
     } else if (ws_label_map[command->type]) {
         if (compiled) {
             serialize_uint32(command->jumpoffset, dest);
         } else {
-            serialize_label(command->label, dest);
+            serialize_label(&command->label, dest);
         }
     }
 }
@@ -182,12 +186,12 @@ static void unserialize_command(ws_command *const command, const int compiled, w
 #endif
     command->type = unserialize_char(source);
     if (ws_parameter_map[command->type]) {
-        command->parameter = unserialize_ws_int(source);
+        unserialize_ws_int(&command->parameter, source);
     } else if (ws_label_map[command->type]) {
         if (compiled) {
             command->jumpoffset = unserialize_uint32(source);
         } else {
-            command->label = unserialize_label(source);
+            unserialize_label(&command->label, source);
         }
     }
 }

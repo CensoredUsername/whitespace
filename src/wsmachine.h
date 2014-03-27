@@ -4,8 +4,6 @@
 #include "wstypes.h"
 //#include "time.h"
 
-
-
 //data structures for ws intepretation runtime
 typedef struct {
     ws_int key;
@@ -40,6 +38,9 @@ void ws_heap_get(ws_int *, const ws_heap *, const ws_int *);
 
 void ws_stack_initialize(ws_stack *);
 void ws_stack_finish(ws_stack *);
+
+void ws_heap_print(ws_heap *);
+void ws_stack_print(ws_stack *);
 
 void ws_callstack_initialize(ws_callstack *);
 void ws_callstack_finish(ws_callstack *);
@@ -270,17 +271,18 @@ void ws_heap_finish(ws_heap *const table) {
 
 void ws_heap_print(ws_heap *const table) {
     printf("hashtable size %#X, length %#X\n", table->size, table->length);
+    char *keystr, *valstr;
     for(size_t i = 0; i < table->size; i++) {
         if (table->entries[i].initialized) {
-            printf("%#4X %4d: %4d\n", i % table->size, table->entries[i].key, table->entries[i].value);
-        } else {
-            printf("%#4X NULL: NULL\n", i % table->size);
+            keystr = ws_int_to_dec_string(&table->entries[i].key);
+            valstr = ws_int_to_dec_string(&table->entries[i].value);
+            printf("%#4X %s: %s\n", i % table->size, keystr, valstr);
         }
     }
 }
 
-static void ws_heap_insert(ws_heap *const table, const ws_int *const key, const ws_int *const value) {
-    //find a free spot and insert our value, this function is only for internal use
+static size_t ws_heap_insert_position(const ws_heap *const table, const ws_int *const key) {
+    //find the correct spot in the heap, this function is only for internal use
     unsigned int hash = ws_int_hash(key);
     unsigned int perturb = hash;
     size_t position = hash % table->size;
@@ -289,25 +291,22 @@ static void ws_heap_insert(ws_heap *const table, const ws_int *const key, const 
         position = (position * 5 + 1 + perturb) % table->size;
         perturb >>= WS_HEAP_PERTURB_SHIFT;
     }
-    if (!table->entries[position].initialized) {
-        table->length++;
-        table->entries[position].initialized = 1;
-    }
-    ws_int_copy(&table->entries[position].key, key);
-    ws_int_copy(&table->entries[position].value, value);
+    return position;
 }
 
 void ws_heap_set(ws_heap *const table, const ws_int *const key, const ws_int *const value) {
     // check if we'e getting too large, and resize
+    size_t position;
     if (WS_HEAP_RESIZE_TIME(table->length, table->size)) {
 
         // oh boy, resizing. save the old table size and 
         ws_heap_entry *old = table->entries;
         size_t old_size = table->size;
+        size_t old_length = table->length;
 
         // create a new array to hold everything
         table->size *= WS_HEAP_RESIZE_FACTOR;
-        table->length = 0;
+        table->length = old_length;
         table->entries = (ws_heap_entry *)malloc(sizeof(ws_heap_entry) * table->size);
 
         // set everyting to uninitialized
@@ -318,9 +317,10 @@ void ws_heap_set(ws_heap *const table, const ws_int *const key, const ws_int *co
         // and populate the new array with the old values
         for(size_t i = 0; i < old_size; i++) {
             if (old[i].initialized) {
-                ws_heap_insert(table, &old[i].key, &old[i].value);
-                ws_int_free(&old[i].key);
-                ws_int_free(&old[i].value);
+                position = ws_heap_insert_position(table, &old[i].key);
+                table->entries[position].key = old[i].key;
+                table->entries[position].value = old[i].value;
+                table->entries[position].initialized = 1;
             }
         }
 
@@ -328,25 +328,30 @@ void ws_heap_set(ws_heap *const table, const ws_int *const key, const ws_int *co
         free(old);
     }
     // actual insertion
-    ws_heap_insert(table, key, value);
+    position = ws_heap_insert_position(table, key);
+
+    if (!table->entries[position].initialized) {
+        table->length++;
+        table->entries[position].initialized = 1;
+        table->entries[position].key = *key;
+    } else {
+        ws_int_free(key);
+    }
+    table->entries[position].value = *value;
 }
 
 void ws_heap_get(ws_int *const result, const ws_heap *const table, const ws_int *const key) {
     //find the spot key and return the value
-    unsigned int hash = ws_int_hash(key);
-    unsigned int perturb = hash;
-    size_t position = hash % table->size;
-    while (table->entries[position].initialized) {
-        if (!ws_int_compare(&table->entries[position].key, key)) {
-            ws_int_copy(result, &table->entries[position].value);
-            return;
-        }
-        position = (position * 5 + 1 + perturb) % table->size;
-        perturb >>= WS_HEAP_PERTURB_SHIFT;
+    size_t position = ws_heap_insert_position(table, key);
+    ws_int_free(key);
+    if (table->entries[position].initialized) {
+        *result = table->entries[position].value;
+        return;
     }
-    printf("Tried to look up value in the heap at ");
-    ws_int_print(key);
-    printf(" which did not exist\n");
+
+    char *decstring = ws_int_to_dec_string(key);
+    printf("Tried to look up value in the heap at %s which did not exist\n", decstring);
+    free(decstring);
     exit(EXIT_FAILURE);
 }
 
@@ -372,8 +377,11 @@ void ws_stack_finish(ws_stack *const stack) {
 
 void ws_stack_print(ws_stack *const stack) {
     printf("stack contents with length %d:\n", stack->length);
+    char *entstr;
     for (size_t i = 0; i < stack->length; i++) {
-        printf("%X\n", ws_int_to_int(stack->entries + i));
+        entstr = ws_int_to_dec_string(stack->entries + i);
+        printf("%s\n", entstr);
+        free(entstr);
     }
 }
 
@@ -434,9 +442,9 @@ static void ws_command_discard(ws_int *const result, ws_stack *const stack) {
         exit(EXIT_FAILURE);
     }
     if(result) {
-        ws_int_copy(result, stack->entries + (--stack->length));
+        *result = stack->entries[--stack->length];
     } else {
-        stack->length--;
+        ws_int_free(stack->entries + (--stack->length));
     }
 }
 
@@ -447,6 +455,9 @@ static void ws_command_slide(ws_stack *const stack, const ws_int *const amount) 
         printf("Tried to slide amount not on stack\n");
         exit(EXIT_FAILURE);
     }
+    for (size_t pos = stack->length - 1 - i; pos < stack->length - 1; pos++) {
+        ws_int_free(stack->entries + pos);
+    }
     stack->length -= i;
     stack->entries[stack->length-1] = tokeep;
 }
@@ -456,7 +467,11 @@ static void ws_command_add(ws_stack *const stack) {
         printf("need at least two items on the stack to add\n");
         exit(EXIT_FAILURE);
     }
-    ws_int_add(stack->entries + stack->length-2, stack->entries + stack->length-2, stack->entries + stack->length-1);
+    ws_int temp;
+    ws_int_add(&temp, stack->entries + stack->length - 2, stack->entries + stack->length - 1);
+    ws_int_free(stack->entries + stack->length - 2);
+    ws_int_free(stack->entries + stack->length - 1);
+    stack->entries[stack->length - 2] = temp;
     stack->length--;
 }
 
@@ -465,7 +480,11 @@ static void ws_command_subtract(ws_stack *const stack) {
         printf("need at least two items on the stack to subtract\n");
         exit(EXIT_FAILURE);
     }
-    ws_int_subtract(stack->entries + stack->length-2, stack->entries + stack->length-2, stack->entries + stack->length-1);
+    ws_int temp;
+    ws_int_subtract(&temp, stack->entries + stack->length - 2, stack->entries + stack->length - 1);
+    ws_int_free(stack->entries + stack->length - 2);
+    ws_int_free(stack->entries + stack->length - 1);
+    stack->entries[stack->length - 2] = temp;
     stack->length--;
 }
 
@@ -474,7 +493,11 @@ static void ws_command_multiply(ws_stack *const stack) {
         printf("need at least two items on the stack to multiply\n");
         exit(EXIT_FAILURE);
     }
-    ws_int_multiply(stack->entries + stack->length-2, stack->entries + stack->length-2, stack->entries + stack->length-1);
+    ws_int temp;
+    ws_int_multiply(&temp, stack->entries + stack->length - 2, stack->entries + stack->length - 1);
+    ws_int_free(stack->entries + stack->length - 2);
+    ws_int_free(stack->entries + stack->length - 1);
+    stack->entries[stack->length - 2] = temp;
     stack->length--;
 }
 
@@ -483,7 +506,11 @@ static void ws_command_divide(ws_stack *const stack) {
         printf("need at least two items on the stack to divide\n");
         exit(EXIT_FAILURE);
     }
-    ws_int_divide(stack->entries + stack->length-2, stack->entries + stack->length-2, stack->entries + stack->length-1);
+    ws_int temp;
+    ws_int_divide(&temp, stack->entries + stack->length - 2, stack->entries + stack->length - 1);
+    ws_int_free(stack->entries + stack->length - 2);
+    ws_int_free(stack->entries + stack->length - 1);
+    stack->entries[stack->length - 2] = temp;
     stack->length--;
 }
 
@@ -492,7 +519,11 @@ static void ws_command_modulo(ws_stack *const stack) {
         printf("need at least two items on the stack to modulo\n");
         exit(EXIT_FAILURE);
     }
-    ws_int_modulo(stack->entries + stack->length-2, stack->entries + stack->length-2, stack->entries + stack->length-1);
+    ws_int temp;
+    ws_int_modulo(&temp, stack->entries + stack->length - 2, stack->entries + stack->length - 1);
+    ws_int_free(stack->entries + stack->length - 2);
+    ws_int_free(stack->entries + stack->length - 1);
+    stack->entries[stack->length - 2] = temp;
     stack->length--;
 }
 
@@ -500,13 +531,13 @@ static void ws_command_set(ws_stack *const stack, ws_heap *const heap) {
     ws_int value, key;
     ws_command_discard(&value, stack);
     ws_command_discard(&key, stack);
-    ws_heap_set(heap, &key, &value);
+    ws_heap_set(heap, &key, &value); //don't have to free here since the heap consumes key and value
 }
 
 static void ws_command_get(ws_stack *const stack, ws_heap *const heap) {
     ws_int value, key;
     ws_command_discard(&key, stack);
-    ws_heap_get(&value, heap, &key);
+    ws_heap_get(&value, heap, &key); //get consumes the key and does not return a copied ws_int, merely a reference
     ws_command_push(stack, &value);
 }
 
@@ -529,6 +560,7 @@ static void ws_command_jumpifzero(size_t *const next_index, ws_stack *const stac
     if (ws_int_iszero(&test)) {
         *next_index = dest;
     }
+    ws_int_free(&test);
 }
 
 static void ws_command_jumpifnegative(size_t *const next_index, ws_stack *const stack, const size_t dest) {
@@ -537,6 +569,7 @@ static void ws_command_jumpifnegative(size_t *const next_index, ws_stack *const 
     if (ws_int_isnegative(&test)) {
         *next_index = dest;
     }
+    ws_int_free(&test);
 }
 
 static void ws_command_endsubroutine(size_t *const next_index, ws_callstack *const callstack) {
@@ -556,26 +589,38 @@ static void ws_command_endprogram(ws_callstack *const callstack) {
 static void ws_command_printchar(ws_stack *const stack) {
     ws_int test;
     ws_command_discard(&test, stack);
+
     putchar(ws_int_to_int(&test));
+
+    ws_int_free(&test);
 }
 
 static void ws_command_printnum(ws_stack *const stack){
     ws_int test;
     ws_command_discard(&test, stack);
-    ws_int_print(&test);
+
+    char *buffer = ws_int_to_dec_string(&test);
+    printf("%s", buffer);
+
+    free(buffer);
+    ws_int_free(&test);
 }
 
 static void ws_command_inputchar(ws_stack *const stack, ws_heap *const heap){
-    ws_int test;
     int i = getchar();
-    ws_int_from_int(&test, i);
-    ws_heap_set(heap, stack->entries + stack->length-1, &test);
+    ws_int test, key;
+    ws_int_from_int(&test, i, NULL);
+
+    ws_int_copy(&key, stack->entries + stack->length - 1); //heap doesnt copy it
+    ws_heap_set(heap, &key, &test); //heap consumes both, no need to free
 }
 
 static void ws_command_inputnum(ws_stack *const stack, ws_heap *const heap) {
-    ws_int test;
+    ws_int test, key;
     ws_int_input(&test);
-    ws_heap_set(heap, stack->entries + stack->length-1, &test);
+
+    ws_int_copy(&key, stack->entries + stack->length - 1);
+    ws_heap_set(heap, &key, &test);
 }
 
 #endif

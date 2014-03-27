@@ -129,7 +129,7 @@ static void ws_map_finish(ws_map *const map) {
     free(map->entries);
 }
 
-static void ws_map_print(ws_map *const map) {
+void ws_map_print(ws_map *const map) {
     printf("hashtable size %#X, length %#X\n", map->size, map->length);
     for(size_t i = 0; i < map->size; i++) {
         if (map->entries[i].initialized) {

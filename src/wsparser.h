@@ -202,9 +202,9 @@ void ws_parse(ws_program *const program, const ws_string *const text) {
 
             //parse the parameters into their data structures
             if (ws_label_map[current_node->type]) {
-                ws_label_from_whitespace(&(current_node->label), &current_parameter);
+                ws_label_from_whitespace(&current_node->label, &current_parameter);
             } else {
-                ws_int_from_whitespace(&(current_node->parameter), &current_parameter);
+                ws_int_from_whitespace(&current_node->parameter, &current_parameter);
             }
 #if DEBUG
             //if we're debugging, create new strings holding the whole whitespace code
